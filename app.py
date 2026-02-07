@@ -5,9 +5,8 @@ import requests
 from datetime import datetime
 
 # =============================
-# AYARLAR VE SABİTLER
+# AYARLAR
 # =============================
-# Eğer secrets dosyan yoksa hata vermemesi için get kullanabilirsin veya try-except
 API_KEY = st.secrets.get("FIVESIM_TOKEN", "TOKEN_YOK")
 PASSWORD_HASH = st.secrets.get("PANEL_PASSWORD_HASH", "")
 
@@ -17,31 +16,40 @@ HEADERS = {
     "Accept": "application/json"
 }
 
-COUNTRY = "england"
+# SABİTLER
+COUNTRY = "england"   # İngiltere (+44)
 OPERATOR = "virtual58"
 PRODUCT = "uber"
-MAX_WAIT_SECONDS = 180
+MAX_WAIT_SECONDS = 900  # 15 Dakika
 
-st.set_page_config(page_title="Panel Giriş", layout="centered")
+st.set_page_config(page_title="SMS Panel", layout="centered", initial_sidebar_state="collapsed")
 
 # =============================
-# LOGIN FONKSİYONU
+# LOGIN VE CSS (Kompakt Görünüm İçin)
 # =============================
+# Sayfa boşluklarını azaltmak için CSS
+st.markdown("""
+    <style>
+        .block-container {padding-top: 1rem; padding-bottom: 0rem;}
+        h1 {margin-top: 0rem; padding-top: 0rem; font-size: 1.5rem;}
+        div[data-testid="stVerticalBlock"] > div {padding-bottom: 0.5rem;}
+    </style>
+""", unsafe_allow_html=True)
+
 def check_password():
     if "authenticated" not in st.session_state:
         st.session_state.authenticated = False
 
     if not st.session_state.authenticated:
-        st.title("🔐 Panel Giriş")
-        pwd = st.text_input("Panel Şifresi", type="password")
-        if st.button("Giriş Yap"):
-            # Buraya kendi hash'ini veya basitlik için direkt şifreyi koyabilirsin test için
+        st.title("🔐 Giriş")
+        pwd = st.text_input("Şifre", type="password")
+        if st.button("Giriş"):
             hashed = hashlib.sha256(pwd.encode()).hexdigest()
             if hashed == PASSWORD_HASH:
                 st.session_state.authenticated = True
                 st.rerun()
             else:
-                st.error("❌ Hatalı şifre")
+                st.error("Hatalı şifre")
         return False
     return True
 
@@ -49,23 +57,25 @@ if not check_password():
     st.stop()
 
 # =============================
-# STATE BAŞLATMA
+# STATE YÖNETİMİ
 # =============================
 if "order_start_time" not in st.session_state:
     st.session_state.order_start_time = None
 
-for key in ["order_id", "phone", "sms_code", "status", "log"]:
+# Gerekli değişkenleri tanımla
+for key in ["order_id", "phone_full", "phone_local", "sms_code", "status", "log"]:
     if key not in st.session_state:
         st.session_state[key] = None
+
 if st.session_state.log is None:
     st.session_state.log = []
 
 def add_log(action, info=""):
-    ts = datetime.now().strftime("%H:%M:%S")
-    st.session_state.log.append(f"[{ts}] {action} {info}")
+    ts = datetime.now().strftime("%H:%M")
+    st.session_state.log.insert(0, f"[{ts}] {action} {info}") # En yeniyi en üste ekle
 
 # =============================
-# API FONKSİYONLARI
+# API İŞLEMLERİ
 # =============================
 def buy_number():
     url = f"{BASE_URL}/user/buy/activation/{COUNTRY}/{OPERATOR}/{PRODUCT}"
@@ -74,12 +84,20 @@ def buy_number():
         if r.status_code == 200:
             data = r.json()
             if "id" in data:
+                # Gelen numara: +447123456789
+                raw_phone = data["phone"]
+                
+                # Parse işlemleri (İngiltere +44 varsayımıyla)
+                phone_full = raw_phone # +44...
+                phone_local = raw_phone.replace("+44", "").replace("44", "", 1) if raw_phone.startswith("44") or raw_phone.startswith("+44") else raw_phone
+
                 st.session_state.order_id = data["id"]
-                st.session_state.phone = data["phone"]
+                st.session_state.phone_full = phone_full
+                st.session_state.phone_local = phone_local
                 st.session_state.sms_code = None
-                st.session_state.status = "PENDING"
-                st.session_state.order_start_time = time.time() # Süreyi başlat
-                add_log("BUY", f"Order {data['id']}")
+                st.session_state.status = "BEKLİYOR"
+                st.session_state.order_start_time = time.time()
+                add_log("ALINDI", data['id'])
             else:
                 st.error(f"API Hatası: {data}")
         else:
@@ -88,26 +106,22 @@ def buy_number():
         st.error(f"Hata: {e}")
 
 def check_sms_status():
-    if not st.session_state.order_id:
-        return
+    if not st.session_state.order_id: return
 
-    order_id = st.session_state.order_id
-    url = f"{BASE_URL}/user/check/{order_id}"
+    url = f"{BASE_URL}/user/check/{st.session_state.order_id}"
     try:
-        r = requests.get(url, headers=HEADERS, timeout=10)
+        r = requests.get(url, headers=HEADERS, timeout=5)
         if r.status_code == 200:
             data = r.json()
-            status = data.get("status")
-            st.session_state.status = status
+            st.session_state.status = data.get("status")
             
             sms_list = data.get("sms", [])
             if sms_list:
                 sms = sms_list[0]
                 code = sms.get("code") or sms.get("text")
                 st.session_state.sms_code = code
-                add_log("SMS_RECEIVED", code)
-                # SMS gelince zamanlayıcıyı durdurmak için start_time'ı sıfırlayabiliriz
-                st.session_state.order_start_time = None 
+                st.session_state.order_start_time = None # Sayacı durdur
+                add_log("SMS GELDİ", code)
     except:
         pass
 
@@ -115,77 +129,98 @@ def cancel_order():
     if st.session_state.order_id:
         url = f"{BASE_URL}/user/cancel/{st.session_state.order_id}"
         requests.get(url, headers=HEADERS)
-        add_log("CANCEL", st.session_state.order_id)
-        # State temizle
-        st.session_state.order_id = None
-        st.session_state.phone = None
-        st.session_state.order_start_time = None
+        add_log("İPTAL", st.session_state.order_id)
+        reset_state()
 
 def ban_order():
     if st.session_state.order_id:
         url = f"{BASE_URL}/user/ban/{st.session_state.order_id}"
         requests.get(url, headers=HEADERS)
         add_log("BAN", st.session_state.order_id)
-        st.session_state.order_id = None
-        st.session_state.phone = None
-        st.session_state.order_start_time = None
+        reset_state()
+
+def reset_state():
+    st.session_state.order_id = None
+    st.session_state.phone_full = None
+    st.session_state.phone_local = None
+    st.session_state.sms_code = None
+    st.session_state.order_start_time = None
+    st.session_state.status = None
 
 # =============================
-# ARAYÜZ
+# ARAYÜZ (KOMPAKT)
 # =============================
-st.title("📱 SMS Panel v2")
 
-# Kontrol Butonları
-c1, c2, c3 = st.columns(3)
-with c1:
-    if st.button("🟢 Yeni Numara Al"):
+# 1. SATIR: BUTONLAR
+col_btn1, col_btn2, col_btn3 = st.columns(3)
+
+with col_btn1:
+    # Eğer numara yoksa "Yeni Al", varsa buton pasif veya işlevsiz görünsün istersen disable edebilirsin.
+    # Ama istek üzerine manuel kontrol tam sende.
+    if st.button("🟢 YENİ NUMARA AL", use_container_width=True):
+        if st.session_state.order_id: 
+            cancel_order() # Öncekini iptal et
         buy_number()
         st.rerun()
 
-with c2:
-    if st.session_state.order_id:
-        if st.button("❌ İptal Et"):
-            cancel_order()
-            st.rerun()
+with col_btn2:
+    if st.button("❌ İPTAL ET", use_container_width=True, disabled=not st.session_state.order_id):
+        cancel_order()
+        st.rerun()
 
-with c3:
-    if st.session_state.order_id:
-        if st.button("🚫 Banla"):
-            ban_order()
-            st.rerun()
+with col_btn3:
+    if st.button("🚫 BANLA", use_container_width=True, disabled=not st.session_state.order_id):
+        ban_order()
+        st.rerun()
 
-st.markdown("---")
+st.divider()
 
-# Numara ve Durum Gösterimi
+# 2. SATIR: NUMARA BİLGİSİ (Varsa Göster)
 if st.session_state.order_id:
-    st.info(f"Numara: **{st.session_state.phone}**")
-    st.caption(f"Durum: {st.session_state.status}")
     
-    # SMS KONTROL MEKANİZMASI (Döngüsüz)
-    if not st.session_state.sms_code:
-        # Süre kontrolü
+    # Numara Kopyalama Kutuları (Yan Yana)
+    c_num1, c_num2 = st.columns(2)
+    
+    with c_num1:
+        st.caption("🌍 Ülke Kodlu (+44...)")
+        st.code(st.session_state.phone_full, language="text")
+        
+    with c_num2:
+        st.caption("🏠 Ülke Kodsuz (7...)")
+        st.code(st.session_state.phone_local, language="text")
+
+    # 3. SATIR: SMS DURUMU VE KODU
+    
+    if st.session_state.sms_code:
+        # --- SMS GELDİĞİNDE GÖRÜNECEK ALAN ---
+        st.success("✅ SMS ONAY KODU GELDİ!")
+        st.markdown("### 👇 KOD AŞAĞIDA")
+        st.code(st.session_state.sms_code, language="text") # Kopyalanabilir büyük kutu
+        
+    else:
+        # --- SMS BEKLENİRKEN GÖRÜNECEK ALAN ---
         elapsed = int(time.time() - st.session_state.order_start_time)
         remaining = MAX_WAIT_SECONDS - elapsed
         
         if remaining > 0:
-            st.progress(1 - (remaining / MAX_WAIT_SECONDS), text=f"SMS Bekleniyor... ({remaining} sn)")
+            mins, secs = divmod(remaining, 60)
+            st.info(f"⏳ SMS Bekleniyor... Kalan: {mins}:{secs:02d}")
+            st.caption(f"Durum: {st.session_state.status}")
             
-            # Arka planda kontrol et
+            # Otomatik Kontrol Döngüsü
             check_sms_status()
             
-            # SMS gelmediyse sayfayı 3 saniye sonra yenile
             if not st.session_state.sms_code:
-                time.sleep(3) 
-                st.rerun()
+                time.sleep(3) # 3 saniye bekle
+                st.rerun()    # Sayfayı yenile
         else:
-            st.error("Zaman aşımı! Numara iptal ediliyor...")
-            cancel_order()
-            st.rerun()
-    else:
-        st.success("SMS GELDİ!")
-        st.code(st.session_state.sms_code, language="text")
+            st.error("⏰ SÜRE DOLDU! (Yeni numara için tuşa basmalısın)")
+            st.session_state.status = "TIMEOUT"
 
-# Log Gösterimi
-with st.expander("İşlem Geçmişi"):
-    for line in reversed(st.session_state.log[-10:]):
+else:
+    st.info("👆 İşlem yapmak için 'Yeni Numara Al' butonuna basın.")
+
+# 4. SATIR: LOG (Gizli/Expander içinde yer kaplamasın)
+with st.expander("📜 İşlem Geçmişi (Log)"):
+    for line in st.session_state.log[:10]:
         st.text(line)
