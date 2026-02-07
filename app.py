@@ -15,7 +15,6 @@ HEADERS = {
     "Accept": "application/json"
 }
 
-# Sabitler
 COUNTRY = "england"
 OPERATOR = "virtual58"
 PRODUCT = "uber"
@@ -24,43 +23,56 @@ MAX_WAIT_SECONDS = 900
 st.set_page_config(page_title="SMS Panel", layout="centered", initial_sidebar_state="collapsed")
 
 # =============================
-# CSS (Butonları Güzelleştirme)
+# CSS (HEADER KAYMASI ÇÖZÜMÜ)
 # =============================
 st.markdown("""
     <style>
+        /* SORUNUN ÇÖZÜMÜ BURADA: */
+        /* Üst boşluğu (padding-top) 5rem yaparak header altına girmeyi engelledik */
         .block-container {
-            padding-top: 2rem !important;
+            padding-top: 5rem !important; 
             padding-bottom: 5rem !important;
         }
-        /* Butonları Büyük ve Belirgin Yap */
+        
+        /* Buton Tasarımları */
         .stButton button {
             height: 3.5rem !important;
             width: 100% !important;
             font-size: 18px !important;
             font-weight: bold !important;
             border-radius: 12px !important;
+            box-shadow: 0px 2px 5px rgba(0,0,0,0.1);
         }
+        
         div[data-testid="stVerticalBlock"] {gap: 1rem;}
+        
+        /* Şifre ekranını ortala */
+        div[data-testid="stForm"] {border: none;}
     </style>
 """, unsafe_allow_html=True)
 
 # =============================
-# GİRİŞ
+# GÜVENLİ GİRİŞ (URL AÇIĞI KAPATILDI)
 # =============================
 def check_login():
-    if st.session_state.get("authenticated", False): return True
-    if st.query_params.get("auth") == "ok":
-        st.session_state.authenticated = True
-        return True
+    if "authenticated" not in st.session_state:
+        st.session_state.authenticated = False
 
-    st.warning("🔐 Giriş Yap")
-    pwd = st.text_input("Şifre", type="password")
-    if st.button("Giriş"):
-        if hashlib.sha256(pwd.encode()).hexdigest() == PASSWORD_HASH:
-            st.session_state.authenticated = True
-            st.query_params["auth"] = "ok"
-            st.rerun()
-    return False
+    if not st.session_state.authenticated:
+        st.warning("🔐 Güvenli Giriş")
+        # Form kullanarak Enter tuşuyla girişi sağla
+        with st.form("login_form"):
+            pwd = st.text_input("Şifre", type="password")
+            submitted = st.form_submit_button("Giriş Yap")
+            
+            if submitted:
+                if hashlib.sha256(pwd.encode()).hexdigest() == PASSWORD_HASH:
+                    st.session_state.authenticated = True
+                    st.rerun()
+                else:
+                    st.error("Hatalı şifre")
+        return False
+    return True
 
 if not check_login(): st.stop()
 
@@ -134,28 +146,24 @@ if not st.session_state.order_id:
 else:
     # --- NUMARA VARSA ---
     
-    # 1. Tam Numara
     st.write("🌍 **Tam Numara (+44)**")
     st.code(st.session_state.phone_full, language="text")
 
-    # 2. Kodsuz Numara
     st.write("🏠 **Sadece Numara (KODSUZ)**")
     st.code(st.session_state.phone_local, language="text")
 
     st.divider()
 
-    # 3. SMS Kutusu
     st.write("📩 **SMS Kodu**")
     if st.session_state.sms_code:
         st.success("KOD GELDİ!")
         st.code(st.session_state.sms_code, language="text")
     else:
-        st.code(".....", language="text") # Boş kutu
+        st.code(".....", language="text")
 
     st.divider()
 
-    # 4. BUTONLAR (KRİTİK HAMLE: RERUN'DAN ÖNCE ÇİZDİRİYORUZ)
-    # Butonları en alta ama kod akışında yukarı koyduk.
+    # --- BUTONLAR (GÖRÜNÜR YERDE) ---
     c1, c2 = st.columns(2)
     with c1:
         if st.button("🚫 Banla", use_container_width=True):
@@ -166,24 +174,20 @@ else:
             cancel_order()
             st.rerun()
 
-    # 5. SÜRE VE YENİLEME MANTIĞI (EN SONA ALINDI)
+    # --- OTOMATİK YENİLEME ---
     if not st.session_state.sms_code:
         elapsed = int(time.time() - st.session_state.start_time)
         rem = MAX_WAIT_SECONDS - elapsed
         
         if rem > 0:
             m, s = divmod(rem, 60)
-            st.caption(f"⏳ Bekleniyor... {m}:{s:02d} (Otomatik Yenilenir)")
-            
-            # API Kontrolü
+            st.caption(f"⏳ Bekleniyor... {m}:{s:02d}")
             check_sms()
-            
-            # Eğer kod hala yoksa yenile
             if not st.session_state.sms_code:
                 time.sleep(3)
-                st.rerun() # <-- RERUN BURADA OLDUĞU İÇİN ARTIK BUTONLARI ENGELLEMEZ
+                st.rerun()
         else:
             st.error("Süre Doldu.")
 
-    # Sayfa altına ekstra boşluk
+    # Alt boşluk
     st.write("\n" * 3)
