@@ -5,7 +5,7 @@ import requests
 from datetime import datetime
 
 # =============================
-# STREAMLIT SECRETS
+# STREAMLIT SECRETS (Cloud)
 # =============================
 API_KEY = st.secrets["FIVESIM_TOKEN"]
 PASSWORD_HASH = st.secrets["PANEL_PASSWORD_HASH"]
@@ -16,7 +16,7 @@ HEADERS = {
     "Accept": "application/json"
 }
 
-# SABİT AYARLAR (SENİN İSTEĞİN)
+# SABİT AYARLAR
 COUNTRY = "england"
 OPERATOR = "virtual58"
 PRODUCT = "uber"
@@ -25,7 +25,7 @@ MAX_WAIT_SECONDS = 180  # 3 dakika
 # =============================
 # SAYFA AYARLARI
 # =============================
-st.set_page_config(page_title="Uber SMS Panel", layout="centered")
+st.set_page_config(page_title="Panel Giriş", layout="centered")
 
 # =============================
 # LOGIN (ŞİFRE EKRANI)
@@ -35,7 +35,7 @@ def check_password():
         st.session_state.authenticated = False
 
     if not st.session_state.authenticated:
-        st.title("🔐 Uber SMS Panel - Giriş")
+        st.title("🔐 Panel Giriş")
 
         pwd = st.text_input("Panel Şifresi", type="password")
 
@@ -43,7 +43,7 @@ def check_password():
             hashed = hashlib.sha256(pwd.encode()).hexdigest()
             if hashed == PASSWORD_HASH:
                 st.session_state.authenticated = True
-                st.experimental_rerun()
+                st.rerun()
             else:
                 st.error("❌ Hatalı şifre")
 
@@ -56,7 +56,7 @@ if not check_password():
 # =============================
 # UYGULAMA BAŞLIYOR
 # =============================
-st.title("📱 Uber SMS Panel (England - Virtual58)")
+st.title("📱 SMS Panel")
 
 # ====== SESSION STATE ======
 for key in ["order_id", "phone", "sms_code", "status", "log"]:
@@ -104,12 +104,6 @@ def ban_order(order_id):
     url = f"{BASE_URL}/user/ban/{order_id}"
     res = requests.get(url, headers=HEADERS).json()
     add_log("BAN", f"Order {order_id}")
-    return res
-
-def finish_order(order_id):
-    url = f"{BASE_URL}/user/finish/{order_id}"
-    res = requests.get(url, headers=HEADERS).json()
-    add_log("FINISH", f"Order {order_id}")
     return res
 
 # =============================
