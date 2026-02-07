@@ -66,28 +66,51 @@ for key in ["order_id", "phone", "sms_code", "status", "log"]:
 if st.session_state.log is None:
     st.session_state.log = []
 
-# ====== FONKSİYONLAR ======
+# ====== LOG FONKSİYONU ======
 def add_log(action, info=""):
     ts = datetime.now().strftime("%H:%M:%S")
     st.session_state.log.append(f"[{ts}] {action} {info}")
 
+# ====== GÜVENLİ BUY_NUMBER (JSON HATASI DÜZELTİLDİ) ======
 def buy_number():
     url = f"{BASE_URL}/user/buy/activation/{COUNTRY}/{OPERATOR}/{PRODUCT}"
-    r = requests.get(url, headers=HEADERS, timeout=30)
-    data = r.json()
 
-    if "id" not in data:
-        st.error(f"Hata: {data}")
-        add_log("ERROR", str(data))
+    try:
+        r = requests.get(url, headers=HEADERS, timeout=30)
+
+        # ---- HTTP STATUS KONTROLÜ ----
+        if r.status_code != 200:
+            st.error(f"HTTP Hata: {r.status_code}")
+            st.text(r.text[:500])
+            add_log("HTTP_ERROR", f"{r.status_code}")
+            return None, None
+
+        # ---- GÜVENLİ JSON PARSE ----
+        try:
+            data = r.json()
+        except Exception as e:
+            st.error("5sim JSON dönmedi!")
+            st.text(r.text[:500])
+            add_log("JSON_ERROR", str(e))
+            return None, None
+
+        if "id" not in data:
+            st.error(f"API Hatası: {data}")
+            add_log("ERROR", str(data))
+            return None, None
+
+        st.session_state.order_id = data["id"]
+        st.session_state.phone = data["phone"]
+        st.session_state.sms_code = None
+        st.session_state.status = "PENDING"
+
+        add_log("BUY", f"Order {data['id']}")
+        return data["id"], data["phone"]
+
+    except requests.exceptions.RequestException as e:
+        st.error(f"Bağlantı hatası: {e}")
+        add_log("REQUEST_ERROR", str(e))
         return None, None
-
-    st.session_state.order_id = data["id"]
-    st.session_state.phone = data["phone"]
-    st.session_state.sms_code = None
-    st.session_state.status = "PENDING"
-
-    add_log("BUY", f"Order {data['id']}")
-    return data["id"], data["phone"]
 
 def check_sms(order_id):
     url = f"{BASE_URL}/user/check/{order_id}"
@@ -116,6 +139,7 @@ c1, c2, c3 = st.columns(3)
 with c1:
     if st.button("🟢 Yeni Numara Al"):
         with st.spinner("Numara alınıyor..."):
+            time.sleep(2)  # rate-limit güvenliği
             buy_number()
 
 with c2:
