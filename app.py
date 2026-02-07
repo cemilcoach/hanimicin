@@ -4,7 +4,7 @@ import streamlit as st
 import requests
 
 # =============================
-# AYARLAR (SABİT)
+# AYARLAR
 # =============================
 API_KEY = st.secrets.get("FIVESIM_TOKEN", "TOKEN_YOK")
 PASSWORD_HASH = st.secrets.get("PANEL_PASSWORD_HASH", "")
@@ -20,25 +20,20 @@ OPERATOR = "virtual58"
 PRODUCT = "uber"
 MAX_WAIT_SECONDS = 900 
 
-# DÜZELTME 1: Layout 'centered' yapıldı (Telefona sığması için)
 st.set_page_config(page_title="SMS Panel", layout="centered", initial_sidebar_state="collapsed")
 
 # =============================
-# CSS DÜZELTMELERİ (MOBİL İÇİN)
+# CSS (MOBİL UYUMLU)
 # =============================
 st.markdown("""
     <style>
-        /* DÜZELTME 2: Üst boşluğu artırdık (padding-top: 4rem) ki menü altında kalmasın */
         .block-container {
             padding-top: 3rem !important; 
             padding-bottom: 1rem !important;
             padding-left: 0.5rem !important;
             padding-right: 0.5rem !important;
         }
-        /* Bileşenler arası boşluk */
         div[data-testid="stVerticalBlock"] {gap: 0.5rem;}
-        
-        /* Butonları telefonda daha rahat basılabilir yap */
         .stButton button {
             height: 3.5rem; 
             width: 100%; 
@@ -49,30 +44,40 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # =============================
-# GİRİŞ EKRANI
+# KALICI GİRİŞ SİSTEMİ
 # =============================
-def check_password():
-    if "authenticated" not in st.session_state:
-        st.session_state.authenticated = False
+def check_login():
+    # 1. Yöntem: Session State kontrolü (Sayfa açıkken)
+    if st.session_state.get("authenticated", False):
+        return True
 
-    if not st.session_state.authenticated:
-        st.markdown("### 🔐 Panel Giriş") # Basit başlık
-        pwd = st.text_input("Şifre", type="password")
-        if st.button("Giriş Yap"):
-            hashed = hashlib.sha256(pwd.encode()).hexdigest()
-            if hashed == PASSWORD_HASH:
-                st.session_state.authenticated = True
-                st.rerun()
-            else:
-                st.error("Hatalı şifre")
-        return False
-    return True
+    # 2. Yöntem: URL Parametresi kontrolü (Sayfa yenilenince)
+    # URL'de ?auth=ok varsa şifre sormadan geçir
+    if st.query_params.get("auth") == "ok":
+        st.session_state.authenticated = True
+        return True
 
-if not check_password():
+    # Giriş Ekranı
+    st.warning("🔐 Panel Giriş")
+    pwd = st.text_input("Şifre", type="password")
+    
+    if st.button("Giriş Yap"):
+        hashed = hashlib.sha256(pwd.encode()).hexdigest()
+        if hashed == PASSWORD_HASH:
+            st.session_state.authenticated = True
+            # URL'ye auth=ok ekle ki yenileyince çıkış yapmasın
+            st.query_params["auth"] = "ok"
+            st.rerun()
+        else:
+            st.error("Hatalı şifre")
+    
+    return False
+
+if not check_login():
     st.stop()
 
 # =============================
-# FONKSİYONLAR
+# STATE & FONKSİYONLAR
 # =============================
 for key in ["order_id", "phone_full", "phone_local", "sms_code", "status", "start_time"]:
     if key not in st.session_state:
@@ -87,12 +92,9 @@ def buy_number():
         if "id" in data:
             raw = data["phone"]
             p_full = raw
-            if raw.startswith("+44"):
-                p_local = raw[3:]
-            elif raw.startswith("44"):
-                p_local = raw[2:]
-            else:
-                p_local = raw
+            if raw.startswith("+44"): p_local = raw[3:]
+            elif raw.startswith("44"): p_local = raw[2:]
+            else: p_local = raw
             
             st.session_state.order_id = data["id"]
             st.session_state.phone_full = p_full
@@ -132,33 +134,31 @@ def check_sms():
             data = r.json()
             st.session_state.status = data.get("status")
             sms_list = data.get("sms", [])
+            
             if sms_list:
+                # Code veya Text alanını kontrol et
                 code = sms_list[0].get("code") or sms_list[0].get("text")
-                st.session_state.sms_code = code
-                st.session_state.start_time = None
+                if code:
+                    st.session_state.sms_code = code
+                    st.session_state.start_time = None
     except:
         pass
 
 # =============================
-# ARAYÜZ (MOBİL UYUMLU)
+# ARAYÜZ (SADELEŞTİRİLMİŞ)
 # =============================
 
-# 1. SATIR: BUTONLAR
-# Streamlit mobilde 3 kolonu bazen alt alta atabilir.
-# Bunu engellemek zordur ama "centered" modunda en iyi böyle görünür.
+# BUTONLAR
 c1, c2, c3 = st.columns(3)
-
 with c1:
     if st.button("✅ YENİ AL", use_container_width=True):
         if st.session_state.order_id: cancel_order()
         buy_number()
         st.rerun()
-
 with c2:
     if st.button("❌ İPTAL", use_container_width=True, disabled=not st.session_state.order_id):
         cancel_order()
         st.rerun()
-
 with c3:
     if st.button("🚫 BANLA", use_container_width=True, disabled=not st.session_state.order_id):
         ban_order()
@@ -166,10 +166,10 @@ with c3:
 
 st.markdown("---")
 
-# 2. SATIR: NUMARA VE DURUM
+# BİLGİ VE SMS EKRANI
 if st.session_state.order_id:
     
-    # Numaralar
+    # Numara Gösterimi
     col_n1, col_n2 = st.columns(2)
     with col_n1:
         st.info("**(+44)**")
@@ -180,22 +180,26 @@ if st.session_state.order_id:
 
     st.markdown("---")
 
-    # SMS Kutusu
+    # SMS Durumu
     if st.session_state.sms_code:
         st.success("SMS GELDİ!")
+        st.markdown("### 👇 KOPYALA:")
         st.code(st.session_state.sms_code, language="text")
     else:
+        # Bekleme Ekranı
         elapsed = int(time.time() - st.session_state.start_time)
         rem = MAX_WAIT_SECONDS - elapsed
         
         if rem > 0:
             m, s = divmod(rem, 60)
             st.info(f"⏳ **{m}:{s:02d}** | {st.session_state.status}")
+            
             check_sms()
             if not st.session_state.sms_code:
                 time.sleep(3)
                 st.rerun()
         else:
             st.error("SÜRE BİTTİ.")
+            
 else:
-    st.info("👆 'YENİ AL' butonuna basınız.")
+    st.info("👆 Numara almak için 'YENİ AL' butonuna bas.")
