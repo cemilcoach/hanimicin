@@ -24,36 +24,22 @@ MAX_WAIT_SECONDS = 900
 st.set_page_config(page_title="SMS Panel", layout="centered", initial_sidebar_state="collapsed")
 
 # =============================
-# CSS (MOBİL ODAKLI - KAYMA ÇÖZÜMÜ)
+# CSS (Butonları Güzelleştirme)
 # =============================
 st.markdown("""
     <style>
-        /* EN ÖNEMLİ KISIM: Sayfanın altına devasa boşluk bırakıyoruz */
         .block-container {
-            padding-top: 1rem !important;
-            padding-bottom: 10rem !important; /* Alt kısımda 10 satır boşluk */
+            padding-top: 2rem !important;
+            padding-bottom: 5rem !important;
         }
-        
-        /* Streamlit footer'ı gizle (Manage app yazısı vb.) */
-        footer {visibility: hidden;}
-        header {visibility: hidden;}
-
-        /* Butonları Takoz Gibi Sağlam Yap */
+        /* Butonları Büyük ve Belirgin Yap */
         .stButton button {
-            height: 4rem !important;
+            height: 3.5rem !important;
             width: 100% !important;
-            border-radius: 12px !important;
             font-size: 18px !important;
-            font-weight: 800 !important;
-            box-shadow: 0px 4px 6px rgba(0,0,0,0.2);
+            font-weight: bold !important;
+            border-radius: 12px !important;
         }
-
-        /* Kod Kutularını Büyüt */
-        .stCode {
-            font-size: 1.4rem !important;
-        }
-        
-        /* Satır aralarını aç */
         div[data-testid="stVerticalBlock"] {gap: 1rem;}
     </style>
 """, unsafe_allow_html=True)
@@ -67,7 +53,7 @@ def check_login():
         st.session_state.authenticated = True
         return True
 
-    st.error("Giriş Yap")
+    st.warning("🔐 Giriş Yap")
     pwd = st.text_input("Şifre", type="password")
     if st.button("Giriş"):
         if hashlib.sha256(pwd.encode()).hexdigest() == PASSWORD_HASH:
@@ -139,68 +125,65 @@ def check_sms():
 # =============================
 
 if not st.session_state.order_id:
-    # --- DURUM 1: NUMARA YOK ---
+    # --- NUMARA YOKSA ---
     st.info("Sistem Hazır.")
-    # Butonu kırmızı ve büyük yapmak için primary type
     if st.button("🚀 YENİ NUMARA AL", type="primary"):
         buy_number()
         st.rerun()
 
 else:
-    # --- DURUM 2: NUMARA VAR ---
+    # --- NUMARA VARSA ---
     
-    # 1. Kodlu Numara (+44)
-    st.write("**🌍 Tam Numara (+44)**")
+    # 1. Tam Numara
+    st.write("🌍 **Tam Numara (+44)**")
     st.code(st.session_state.phone_full, language="text")
 
-    # 2. Kodsuz Numara (Sade)
-    st.write("**🏠 Sadece Numara (KODSUZ)**")
+    # 2. Kodsuz Numara
+    st.write("🏠 **Sadece Numara (KODSUZ)**")
     st.code(st.session_state.phone_local, language="text")
 
-    st.markdown("---")
+    st.divider()
 
-    # 3. SMS KUTUSU (BOŞ veya DOLU)
-    st.write("**📩 SMS Kodu**")
-    
+    # 3. SMS Kutusu
+    st.write("📩 **SMS Kodu**")
     if st.session_state.sms_code:
-        # Kod Geldi
         st.success("KOD GELDİ!")
         st.code(st.session_state.sms_code, language="text")
     else:
-        # Kod Bekleniyor
-        elapsed = int(time.time() - st.session_state.start_time)
-        rem = MAX_WAIT_SECONDS - elapsed
-        
-        # Boş kutu placeholder (ekran görüntüsündeki gibi)
-        st.code(".....", language="text")
-        
-        if rem > 0:
-            m, s = divmod(rem, 60)
-            st.caption(f"⏳ Bekleniyor... {m}:{s:02d}")
-            check_sms()
-            if not st.session_state.sms_code:
-                time.sleep(3)
-                st.rerun()
-        else:
-            st.error("Süre Bitti.")
+        st.code(".....", language="text") # Boş kutu
 
-    st.markdown("---")
+    st.divider()
 
-    # 4. BUTONLAR (ALTA YAPIŞIK DEĞİL, ORTADA)
+    # 4. BUTONLAR (KRİTİK HAMLE: RERUN'DAN ÖNCE ÇİZDİRİYORUZ)
+    # Butonları en alta ama kod akışında yukarı koyduk.
     c1, c2 = st.columns(2)
     with c1:
-        # Ban Butonu
         if st.button("🚫 Banla", use_container_width=True):
             ban_order()
             st.rerun()
     with c2:
-        # İptal Butonu (Primary = Kırmızımsı/Renkli)
         if st.button("❌ İptal", type="primary", use_container_width=True):
             cancel_order()
             st.rerun()
 
-    # !!! BU KISIM HAYAT KURTARIR !!!
-    # Sayfanın en altına yapay boşluk ekliyoruz ki
-    # telefonun menüsü butonların üstüne binmesin.
-    st.write("\n" * 10) 
-    st.markdown("<br><br><br>", unsafe_allow_html=True)
+    # 5. SÜRE VE YENİLEME MANTIĞI (EN SONA ALINDI)
+    if not st.session_state.sms_code:
+        elapsed = int(time.time() - st.session_state.start_time)
+        rem = MAX_WAIT_SECONDS - elapsed
+        
+        if rem > 0:
+            m, s = divmod(rem, 60)
+            st.caption(f"⏳ Bekleniyor... {m}:{s:02d} (Otomatik Yenilenir)")
+            
+            # API Kontrolü
+            check_sms()
+            
+            # Eğer kod hala yoksa yenile
+            if not st.session_state.sms_code:
+                time.sleep(3)
+                st.rerun() # <-- RERUN BURADA OLDUĞU İÇİN ARTIK BUTONLARI ENGELLEMEZ
+        else:
+            st.error("Süre Doldu.")
+
+    # Sayfa altına ekstra boşluk
+    st.write("\n" * 3)
