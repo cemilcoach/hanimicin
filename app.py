@@ -20,7 +20,7 @@ HEADERS = {
 COUNTRY = "england"
 OPERATOR = "virtual58"
 PRODUCT = "uber"
-MAX_WAIT_SECONDS = 180  # 3 dakika
+MAX_WAIT_SECONDS = 900  # 15 dakika (5sim ile uyumlu)
 
 # =============================
 # SAYFA AYARLARI
@@ -66,71 +66,82 @@ for key in ["order_id", "phone", "sms_code", "status", "log"]:
 if st.session_state.log is None:
     st.session_state.log = []
 
-# ====== LOG FONKSİYONU ======
+# ====== LOG ======
 def add_log(action, info=""):
     ts = datetime.now().strftime("%H:%M:%S")
     st.session_state.log.append(f"[{ts}] {action} {info}")
 
-# ====== GÜVENLİ BUY_NUMBER (JSON HATASI DÜZELTİLDİ) ======
-def buy_number():
-    url = f"{BASE_URL}/user/buy/activation/{COUNTRY}/{OPERATOR}/{PRODUCT}"
-
+# ====== GÜVENLİ REQUEST ======
+def safe_get_json(url):
     try:
         r = requests.get(url, headers=HEADERS, timeout=30)
 
-        # ---- HTTP STATUS KONTROLÜ ----
         if r.status_code != 200:
-            st.error(f"HTTP Hata: {r.status_code}")
+            st.error(f"HTTP {r.status_code}")
             st.text(r.text[:500])
-            add_log("HTTP_ERROR", f"{r.status_code}")
-            return None, None
+            add_log("HTTP_ERROR", str(r.status_code))
+            return None
 
-        # ---- GÜVENLİ JSON PARSE ----
         try:
-            data = r.json()
-        except Exception as e:
+            return r.json()
+        except Exception:
             st.error("5sim JSON dönmedi!")
             st.text(r.text[:500])
-            add_log("JSON_ERROR", str(e))
-            return None, None
-
-        if "id" not in data:
-            st.error(f"API Hatası: {data}")
-            add_log("ERROR", str(data))
-            return None, None
-
-        st.session_state.order_id = data["id"]
-        st.session_state.phone = data["phone"]
-        st.session_state.sms_code = None
-        st.session_state.status = "PENDING"
-
-        add_log("BUY", f"Order {data['id']}")
-        return data["id"], data["phone"]
+            add_log("JSON_ERROR", "invalid json")
+            return None
 
     except requests.exceptions.RequestException as e:
         st.error(f"Bağlantı hatası: {e}")
         add_log("REQUEST_ERROR", str(e))
+        return None
+
+# ====== BUY NUMBER ======
+def buy_number():
+    url = f"{BASE_URL}/user/buy/activation/{COUNTRY}/{OPERATOR}/{PRODUCT}"
+    data = safe_get_json(url)
+    if not data:
         return None, None
 
+    if "id" not in data:
+        st.error(f"API Hatası: {data}")
+        add_log("ERROR", str(data))
+        return None, None
+
+    st.session_state.order_id = data["id"]
+    st.session_state.phone = data["phone"]
+    st.session_state.sms_code = None
+    st.session_state.status = "PENDING"
+
+    add_log("BUY", f"Order {data['id']}")
+    return data["id"], data["phone"]
+
+# ====== CHECK SMS ======
 def check_sms(order_id):
     url = f"{BASE_URL}/user/check/{order_id}"
-    r = requests.get(url, headers=HEADERS, timeout=30)
-    return r.json()
+    data = safe_get_json(url)
+    return data or {}
+
+# ====== FINISH (YENİ EKLENDİ) ======
+def finish_order(order_id):
+    url = f"{BASE_URL}/user/finish/{order_id}"
+    res = safe_get_json(url)
+    add_log("FINISH", f"Order {order_id}")
+    return res
 
 def cancel_order(order_id):
     url = f"{BASE_URL}/user/cancel/{order_id}"
-    res = requests.get(url, headers=HEADERS).json()
+    res = safe_get_json(url)
     add_log("CANCEL", f"Order {order_id}")
     return res
 
 def ban_order(order_id):
     url = f"{BASE_URL}/user/ban/{order_id}"
-    res = requests.get(url, headers=HEADERS).json()
+    res = safe_get_json(url)
     add_log("BAN", f"Order {order_id}")
     return res
 
 # =============================
-# MODERN BUTON SATIRI
+# BUTONLAR
 # =============================
 st.markdown("### 🚀 Kontrol Paneli")
 
@@ -139,18 +150,16 @@ c1, c2, c3 = st.columns(3)
 with c1:
     if st.button("🟢 Yeni Numara Al"):
         with st.spinner("Numara alınıyor..."):
-            time.sleep(2)  # rate-limit güvenliği
+            time.sleep(2)
             buy_number()
 
 with c2:
     if st.session_state.order_id and st.button("❌ Cancel"):
         cancel_order(st.session_state.order_id)
-        buy_number()  # TEK TIKLA YENİ NUMARA
 
 with c3:
     if st.session_state.order_id and st.button("🚫 Ban"):
         ban_order(st.session_state.order_id)
-        buy_number()  # TEK TIKLA YENİ NUMARA
 
 st.markdown("---")
 
@@ -173,7 +182,7 @@ if st.session_state.phone:
 st.markdown("---")
 
 # =============================
-# SAYAÇ + SMS BEKLEME
+# SAYAÇ + SMS BEKLEME (YENİ DAVRANIŞ)
 # =============================
 if st.session_state.order_id:
     st.subheader("📩 SMS Bekleniyor...")
@@ -203,15 +212,17 @@ if st.session_state.order_id:
             code = sms.get("code") or sms.get("text")
             st.session_state.sms_code = code
 
-            success_card.success("✅ **BAŞARILI! SMS ALINDI**")
+            # >>> ÖNEMLİ: SMS GELİNCE 5SIM'DE FINISH ÇEKİYORUZ <<<
+            finish_order(st.session_state.order_id)
+
+            success_card.success("✅ **BAŞARILI! SMS ALINDI (FINISHED)**")
             add_log("SMS_RECEIVED", code)
             break
 
         if remaining == 0:
-            st.warning("⏰ Zaman Aşımı!")
+            st.warning("⏰ Süre doldu — yeni numara için butona bas.")
             add_log("TIMEOUT", f"Order {st.session_state.order_id}")
-            buy_number()  # otomatik yeni numara
-            break
+            break  # >>> OTOMATİK BUY YOK <<<
 
         time.sleep(3)
 
