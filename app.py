@@ -25,17 +25,14 @@ MAX_WAIT_SECONDS = 900
 st.set_page_config(page_title="SMS Panel", layout="centered", initial_sidebar_state="collapsed")
 
 # =============================
-# CSS (EKRAN KAYMASI ENGELLİ)
+# CSS (UI DÜZELTMELERİ)
 # =============================
 st.markdown("""
     <style>
-        /* Header ve Footer Kaymasını Önleyen Boşluklar */
         .block-container {
             padding-top: 3rem !important; 
             padding-bottom: 10rem !important;
         }
-        
-        /* Butonları İyileştir */
         .stButton button {
             height: 3.5rem !important;
             width: 100% !important;
@@ -44,11 +41,8 @@ st.markdown("""
             border-radius: 12px !important;
             box-shadow: 0 4px 6px rgba(0,0,0,0.1);
         }
-        
-        /* Kod Kutusu Yazı Boyutu */
         .stCode { font-size: 1.3rem !important; }
-        
-        div[data-testid="stVerticalBlock"] {gap: 1rem;}
+        div[data-testid="stVerticalBlock"] {gap: 0.8rem;}
     </style>
 """, unsafe_allow_html=True)
 
@@ -109,20 +103,16 @@ def check_sms():
         
         if r.status_code == 200:
             data = r.json()
-            st.session_state.raw_data = data # Debug için kaydet
+            st.session_state.raw_data = data 
             st.session_state.status = data.get("status")
             
             sms_list = data.get("sms", [])
             if sms_list:
-                # 1. YÖNTEM: Direkt Code Alanı
                 code = sms_list[0].get("code")
-                
-                # 2. YÖNTEM: Text İçinden Regex ile Bulma (Yedek)
                 if not code:
                     text = sms_list[0].get("text", "")
                     match = re.search(r'\b\d{4,8}\b', text)
-                    if match:
-                        code = match.group(0)
+                    if match: code = match.group(0)
                 
                 if code:
                     st.session_state.sms_code = code
@@ -157,7 +147,7 @@ if not st.session_state.order_id:
 else:
     # --- NUMARA VARSA ---
     
-    # 1. Numaralar
+    # 1. NUMARALAR
     st.write("🌍 **Tam Numara (+44)**")
     st.code(st.session_state.phone_full, language="text")
 
@@ -166,44 +156,8 @@ else:
 
     st.divider()
 
-    # 2. SMS Alanı
-    st.write("📩 **SMS Kodu**")
-    
-    if st.session_state.sms_code:
-        st.success("KOD GELDİ!")
-        st.code(st.session_state.sms_code, language="text")
-    else:
-        # Bekleme Modu
-        st.code(".....", language="text")
-        
-        # Manuel Kontrol Butonu (Hayat Kurtarıcı)
-        col_check1, col_check2 = st.columns([3, 1])
-        with col_check2:
-            if st.button("🔄", help="Manuel Kontrol Et"):
-                check_sms()
-                st.rerun()
-        
-        # Süre ve Otomatik Yenileme
-        if st.session_state.start_time:
-            elapsed = int(time.time() - st.session_state.start_time)
-            rem = MAX_WAIT_SECONDS - elapsed
-            
-            if rem > 0:
-                m, s = divmod(rem, 60)
-                with col_check1:
-                    st.caption(f"⏳ Bekleniyor... {m}:{s:02d}")
-                
-                # Otomatik Kontrol
-                check_sms()
-                if not st.session_state.sms_code:
-                    time.sleep(3)
-                    st.rerun()
-            else:
-                st.error("Süre Doldu.")
-
-    st.divider()
-
-    # 3. Aksiyon Butonları
+    # 2. BUTONLAR (KRİTİK HAMLE: BURAYA ALINDI!)
+    # Butonları SMS bekleme kısmından ÖNCE çizdiriyoruz ki yenilenince kaybolmasın.
     c1, c2 = st.columns(2)
     with c1:
         if st.button("🚫 Banla", use_container_width=True):
@@ -214,10 +168,40 @@ else:
             cancel_order()
             st.rerun()
 
-    # DEBUG ALANI (Gizli)
-    # Eğer kod gelmiyorsa burayı açıp bakabilirsin
-    with st.expander("🛠 Sorun mu var? (Ham Veri)"):
+    st.divider()
+
+    # 3. SMS ALANI VE BEKLEME MANTIĞI
+    st.write("📩 **SMS Kodu**")
+    
+    if st.session_state.sms_code:
+        st.success("KOD GELDİ!")
+        st.code(st.session_state.sms_code, language="text")
+    else:
+        st.code(".....", language="text")
+        
+        # Manuel Yenileme
+        if st.button("🔄 Kontrol Et"):
+            check_sms()
+            st.rerun()
+        
+        # Otomatik Süreç
+        if st.session_state.start_time:
+            elapsed = int(time.time() - st.session_state.start_time)
+            rem = MAX_WAIT_SECONDS - elapsed
+            
+            if rem > 0:
+                m, s = divmod(rem, 60)
+                st.caption(f"⏳ Bekleniyor... {m}:{s:02d}")
+                
+                check_sms()
+                if not st.session_state.sms_code:
+                    time.sleep(3)
+                    st.rerun() # Burası çalışsa bile butonlar yukarıda çizildiği için kaybolmaz.
+            else:
+                st.error("Süre Doldu.")
+
+    # Debug Alanı
+    with st.expander("🛠 Ham Veri"):
         st.json(st.session_state.raw_data)
 
-    # Alt Boşluk
     st.write("\n" * 10)
