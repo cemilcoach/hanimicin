@@ -16,16 +16,21 @@ HEADERS = {
     "Accept": "application/json"
 }
 
-# Sabitler
-COUNTRY = "england"
-OPERATOR = "virtual58"
+# --- 1. TERCİH (UCUZ) ---
+CFG_1_COUNTRY = "portugal"
+CFG_1_OPERATOR = "virtual51"
+
+# --- 2. TERCİH (GARANTİ/YEDEK) ---
+CFG_2_COUNTRY = "england"
+CFG_2_OPERATOR = "virtual58"
+
 PRODUCT = "uber"
 MAX_WAIT_SECONDS = 900 
 
 st.set_page_config(page_title="SMS Panel", layout="centered", initial_sidebar_state="collapsed")
 
 # =============================
-# CSS (UI DÜZELTMELERİ)
+# CSS (MOBİL UYUMLU)
 # =============================
 st.markdown("""
     <style>
@@ -68,32 +73,68 @@ if not check_login(): st.stop()
 # =============================
 # STATE
 # =============================
-for key in ["order_id", "phone_full", "phone_local", "sms_code", "status", "start_time", "raw_data"]:
+for key in ["order_id", "phone_full", "phone_local", "sms_code", "status", "start_time", "raw_data", "current_country"]:
     if key not in st.session_state:
         st.session_state[key] = None
 
 # =============================
-# FONKSİYONLAR
+# AKILLI NUMARA ALMA FONKSİYONU
 # =============================
 def buy_number():
+    # --- DENEME 1: PORTEKİZ ---
     try:
-        url = f"{BASE_URL}/user/buy/activation/{COUNTRY}/{OPERATOR}/{PRODUCT}"
-        r = requests.get(url, headers=HEADERS, timeout=10)
-        data = r.json()
-        if "id" in data:
-            full = data["phone"]
-            local = full[3:] if full.startswith("+44") else (full[2:] if full.startswith("44") else full)
-            
-            st.session_state.order_id = data["id"]
-            st.session_state.phone_full = full
-            st.session_state.phone_local = local
-            st.session_state.sms_code = None
-            st.session_state.status = "BEKLİYOR"
-            st.session_state.start_time = time.time()
-            st.session_state.raw_data = None
+        url1 = f"{BASE_URL}/user/buy/activation/{CFG_1_COUNTRY}/{CFG_1_OPERATOR}/{PRODUCT}"
+        r1 = requests.get(url1, headers=HEADERS, timeout=10)
+        data1 = r1.json()
+        
+        if "id" in data1:
+            # BAŞARILI OLDU (PORTEKİZ)
+            set_session(data1, "🇵🇹 Portekiz")
+            return
         else:
-            st.error(f"Hata: {data}")
-    except Exception as e: st.error(f"Bağlantı: {e}")
+            # HATA ALDIK, LOGLAYALIM AMA DURMAYALIM
+            print(f"Portekiz alınamadı: {data1}")
+            
+    except Exception as e:
+        print(f"Portekiz bağlantı hatası: {e}")
+
+    # --- DENEME 2: İNGİLTERE (YEDEK) ---
+    try:
+        # Kullanıcıya bilgi verelim (Toast mesajı sağ altta çıkar)
+        st.toast("Portekiz'de stok yok, İngiltere deneniyor...", icon="🇬🇧")
+        
+        url2 = f"{BASE_URL}/user/buy/activation/{CFG_2_COUNTRY}/{CFG_2_OPERATOR}/{PRODUCT}"
+        r2 = requests.get(url2, headers=HEADERS, timeout=10)
+        data2 = r2.json()
+        
+        if "id" in data2:
+            # BAŞARILI OLDU (İNGİLTERE)
+            set_session(data2, "🇬🇧 İngiltere")
+            return
+        else:
+            st.error(f"İKİSİNDE DE NUMARA YOK! Hata: {data2}")
+            
+    except Exception as e:
+        st.error(f"İngiltere bağlantı hatası: {e}")
+
+def set_session(data, country_name):
+    full = data["phone"]
+    # Ülke kodunu temizleme mantığı (+351 veya +44 fark etmez, temizler)
+    # Basitçe "+" varsa siler, sonra ilk 2-3 haneyi temizlemeye çalışırız ama
+    # en garantisi kullanıcıya tam numarayı verip kopyalatmak.
+    # Yine de kodsuz hali için basit bir replace yapalım:
+    local = full.replace("+", "")
+    if local.startswith("44"): local = local[2:]      # İngiltere
+    elif local.startswith("351"): local = local[3:]   # Portekiz
+    
+    st.session_state.order_id = data["id"]
+    st.session_state.phone_full = full
+    st.session_state.phone_local = local
+    st.session_state.sms_code = None
+    st.session_state.status = "BEKLİYOR"
+    st.session_state.current_country = country_name
+    st.session_state.start_time = time.time()
+    st.session_state.raw_data = None
 
 def check_sms():
     if not st.session_state.order_id: return
@@ -130,7 +171,7 @@ def ban_order():
         reset_state()
 
 def reset_state():
-    for key in ["order_id", "phone_full", "phone_local", "sms_code", "start_time", "status", "raw_data"]:
+    for key in ["order_id", "phone_full", "phone_local", "sms_code", "start_time", "status", "raw_data", "current_country"]:
         st.session_state[key] = None
 
 # =============================
@@ -139,16 +180,19 @@ def reset_state():
 
 if not st.session_state.order_id:
     # --- NUMARA YOKSA ---
-    st.info("Sistem Hazır.")
-    if st.button("🚀 YENİ NUMARA AL (Uber)", type="primary"):
+    st.info("Sistem Hazır. Önce Portekiz, yoksa İngiltere denenir.")
+    if st.button("🚀 NUMARA AL (Uber)", type="primary"):
         buy_number()
         st.rerun()
 
 else:
     # --- NUMARA VARSA ---
     
+    # Ülke Bilgisi
+    st.markdown(f"### {st.session_state.current_country}")
+    
     # 1. NUMARALAR
-    st.write("🌍 **Tam Numara (+44)**")
+    st.write("🌍 **Tam Numara**")
     st.code(st.session_state.phone_full, language="text")
 
     st.write("🏠 **Sadece Numara (KODSUZ)**")
@@ -156,8 +200,7 @@ else:
 
     st.divider()
 
-    # 2. BUTONLAR (KRİTİK HAMLE: BURAYA ALINDI!)
-    # Butonları SMS bekleme kısmından ÖNCE çizdiriyoruz ki yenilenince kaybolmasın.
+    # 2. BUTONLAR (ÜSTTE - KAYBOLMAZ)
     c1, c2 = st.columns(2)
     with c1:
         if st.button("🚫 Banla", use_container_width=True):
@@ -170,7 +213,7 @@ else:
 
     st.divider()
 
-    # 3. SMS ALANI VE BEKLEME MANTIĞI
+    # 3. SMS ALANI
     st.write("📩 **SMS Kodu**")
     
     if st.session_state.sms_code:
@@ -196,11 +239,11 @@ else:
                 check_sms()
                 if not st.session_state.sms_code:
                     time.sleep(3)
-                    st.rerun() # Burası çalışsa bile butonlar yukarıda çizildiği için kaybolmaz.
+                    st.rerun()
             else:
                 st.error("Süre Doldu.")
 
-    # Debug Alanı
+    # Debug
     with st.expander("🛠 Ham Veri"):
         st.json(st.session_state.raw_data)
 
