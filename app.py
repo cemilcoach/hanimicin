@@ -16,11 +16,11 @@ HEADERS = {
     "Accept": "application/json"
 }
 
-# --- 1. TERCİH (UCUZ) ---
+# --- 1. TERCİH (PORTEKİZ) ---
 CFG_1_COUNTRY = "portugal"
 CFG_1_OPERATOR = "virtual51"
 
-# --- 2. TERCİH (GARANTİ/YEDEK) ---
+# --- 2. TERCİH (İNGİLTERE) ---
 CFG_2_COUNTRY = "england"
 CFG_2_OPERATOR = "virtual58"
 
@@ -30,7 +30,7 @@ MAX_WAIT_SECONDS = 900
 st.set_page_config(page_title="SMS Panel", layout="centered", initial_sidebar_state="collapsed")
 
 # =============================
-# CSS (MOBİL UYUMLU)
+# CSS
 # =============================
 st.markdown("""
     <style>
@@ -73,59 +73,55 @@ if not check_login(): st.stop()
 # =============================
 # STATE
 # =============================
-for key in ["order_id", "phone_full", "phone_local", "sms_code", "status", "start_time", "raw_data", "current_country"]:
+for key in ["order_id", "phone_full", "phone_local", "sms_code", "status", "start_time", "raw_data", "current_country", "error_msg"]:
     if key not in st.session_state:
         st.session_state[key] = None
 
 # =============================
-# AKILLI NUMARA ALMA FONKSİYONU
+# FONKSİYONLAR
 # =============================
 def buy_number():
-    # --- DENEME 1: PORTEKİZ ---
-    try:
-        url1 = f"{BASE_URL}/user/buy/activation/{CFG_1_COUNTRY}/{CFG_1_OPERATOR}/{PRODUCT}"
-        r1 = requests.get(url1, headers=HEADERS, timeout=10)
-        data1 = r1.json()
-        
-        if "id" in data1:
-            # BAŞARILI OLDU (PORTEKİZ)
-            set_session(data1, "🇵🇹 Portekiz")
-            return
-        else:
-            # HATA ALDIK, LOGLAYALIM AMA DURMAYALIM
-            print(f"Portekiz alınamadı: {data1}")
-            
-    except Exception as e:
-        print(f"Portekiz bağlantı hatası: {e}")
+    msg_box = st.empty()
+    
+    # --- ADIM 1: PORTEKİZ (6 Saniye Zorla) ---
+    end_time = time.time() + 6
+    attempt = 1
+    
+    while time.time() < end_time:
+        msg_box.info(f"🇵🇹 Portekiz deneniyor... ({attempt})", icon="⏳")
+        try:
+            url1 = f"{BASE_URL}/user/buy/activation/{CFG_1_COUNTRY}/{CFG_1_OPERATOR}/{PRODUCT}"
+            r1 = requests.get(url1, headers=HEADERS, timeout=5)
+            data1 = r1.json()
+            if "id" in data1:
+                set_session(data1, "🇵🇹 Portekiz")
+                return 
+        except: pass 
+        attempt += 1
+        time.sleep(1.5)
 
-    # --- DENEME 2: İNGİLTERE (YEDEK) ---
+    # --- ADIM 2: İNGİLTERE ---
+    msg_box.warning("⚠️ İngiltere'ye geçiliyor...", icon="🔄")
+    time.sleep(1)
+
+    msg_box.info("🇬🇧 İngiltere alınıyor...", icon="🚀")
     try:
-        # Kullanıcıya bilgi verelim (Toast mesajı sağ altta çıkar)
-        st.toast("Portekiz'de stok yok, İngiltere deneniyor...", icon="🇬🇧")
-        
         url2 = f"{BASE_URL}/user/buy/activation/{CFG_2_COUNTRY}/{CFG_2_OPERATOR}/{PRODUCT}"
         r2 = requests.get(url2, headers=HEADERS, timeout=10)
         data2 = r2.json()
-        
         if "id" in data2:
-            # BAŞARILI OLDU (İNGİLTERE)
             set_session(data2, "🇬🇧 İngiltere")
             return
         else:
-            st.error(f"İKİSİNDE DE NUMARA YOK! Hata: {data2}")
-            
+            st.session_state.error_msg = f"❌ İNGİLTERE DE DOLU! Hata: {data2}"
     except Exception as e:
-        st.error(f"İngiltere bağlantı hatası: {e}")
+        st.session_state.error_msg = f"Bağlantı Hatası: {e}"
 
 def set_session(data, country_name):
     full = data["phone"]
-    # Ülke kodunu temizleme mantığı (+351 veya +44 fark etmez, temizler)
-    # Basitçe "+" varsa siler, sonra ilk 2-3 haneyi temizlemeye çalışırız ama
-    # en garantisi kullanıcıya tam numarayı verip kopyalatmak.
-    # Yine de kodsuz hali için basit bir replace yapalım:
     local = full.replace("+", "")
-    if local.startswith("44"): local = local[2:]      # İngiltere
-    elif local.startswith("351"): local = local[3:]   # Portekiz
+    if local.startswith("44"): local = local[2:]
+    elif local.startswith("351"): local = local[3:]
     
     st.session_state.order_id = data["id"]
     st.session_state.phone_full = full
@@ -135,6 +131,7 @@ def set_session(data, country_name):
     st.session_state.current_country = country_name
     st.session_state.start_time = time.time()
     st.session_state.raw_data = None
+    st.session_state.error_msg = None
 
 def check_sms():
     if not st.session_state.order_id: return
@@ -150,28 +147,53 @@ def check_sms():
             sms_list = data.get("sms", [])
             if sms_list:
                 code = sms_list[0].get("code")
+                text = sms_list[0].get("text", "")
+                
                 if not code:
-                    text = sms_list[0].get("text", "")
                     match = re.search(r'\b\d{4,8}\b', text)
                     if match: code = match.group(0)
+                
+                if not code and text: code = text 
                 
                 if code:
                     st.session_state.sms_code = code
                     st.session_state.start_time = None
     except: pass
 
+# --- GÜNCELLENEN İPTAL FONKSİYONLARI ---
 def cancel_order():
-    if st.session_state.order_id:
-        requests.get(f"{BASE_URL}/user/cancel/{st.session_state.order_id}", headers=HEADERS)
-        reset_state()
+    if not st.session_state.order_id: return
+    try:
+        url = f"{BASE_URL}/user/cancel/{st.session_state.order_id}"
+        r = requests.get(url, headers=HEADERS, timeout=10)
+        data = r.json()
+        
+        # 5sim başarılı olursa status 200 döner ve JSON içinde sipariş detayları olur
+        if r.status_code == 200:
+            st.toast("✅ İptal Başarılı!", icon="🗑️")
+            reset_state() # Sadece başarılıysa sil
+        else:
+            st.error(f"❌ İptal Edilemedi! 5sim Cevabı: {data}")
+    except Exception as e:
+        st.error(f"Bağlantı Hatası: {e}")
 
 def ban_order():
-    if st.session_state.order_id:
-        requests.get(f"{BASE_URL}/user/ban/{st.session_state.order_id}", headers=HEADERS)
-        reset_state()
+    if not st.session_state.order_id: return
+    try:
+        url = f"{BASE_URL}/user/ban/{st.session_state.order_id}"
+        r = requests.get(url, headers=HEADERS, timeout=10)
+        data = r.json()
+        
+        if r.status_code == 200:
+            st.toast("✅ Numara Banlandı ve İptal Edildi!", icon="🚫")
+            reset_state()
+        else:
+            st.error(f"❌ Banlanamadı! 5sim Cevabı: {data}")
+    except Exception as e:
+        st.error(f"Bağlantı Hatası: {e}")
 
 def reset_state():
-    for key in ["order_id", "phone_full", "phone_local", "sms_code", "start_time", "status", "raw_data", "current_country"]:
+    for key in ["order_id", "phone_full", "phone_local", "sms_code", "start_time", "status", "raw_data", "current_country", "error_msg"]:
         st.session_state[key] = None
 
 # =============================
@@ -179,8 +201,15 @@ def reset_state():
 # =============================
 
 if not st.session_state.order_id:
-    # --- NUMARA YOKSA ---
-    st.info("Sistem Hazır. Önce Portekiz, yoksa İngiltere denenir.")
+    # --- HAZIR ---
+    st.info("Sistem Hazır. (6sn Portekiz -> İngiltere)")
+    
+    if st.session_state.error_msg:
+        st.error(st.session_state.error_msg)
+        if st.button("🗑️ Temizle"):
+            st.session_state.error_msg = None
+            st.rerun()
+
     if st.button("🚀 NUMARA AL (Uber)", type="primary"):
         buy_number()
         st.rerun()
@@ -188,19 +217,32 @@ if not st.session_state.order_id:
 else:
     # --- NUMARA VARSA ---
     
-    # Ülke Bilgisi
     st.markdown(f"### {st.session_state.current_country}")
     
-    # 1. NUMARALAR
     st.write("🌍 **Tam Numara**")
     st.code(st.session_state.phone_full, language="text")
 
     st.write("🏠 **Sadece Numara (KODSUZ)**")
     st.code(st.session_state.phone_local, language="text")
 
+    st.write("📩 **SMS Kodu**")
+    
+    if st.session_state.sms_code:
+        st.success("KOD GELDİ!")
+        st.code(st.session_state.sms_code, language="text")
+        
+        # SES ÇALMA
+        st.markdown("""
+            <audio autoplay="true">
+            <source src="https://upload.wikimedia.org/wikipedia/commons/a/a5/Glass_ping-sound.wav" type="audio/wav">
+            </audio>
+            """, unsafe_allow_html=True)
+    else:
+        st.code(".....", language="text")
+
     st.divider()
 
-    # 2. BUTONLAR (ÜSTTE - KAYBOLMAZ)
+    # BUTONLAR
     c1, c2 = st.columns(2)
     with c1:
         if st.button("🚫 Banla", use_container_width=True):
@@ -211,23 +253,12 @@ else:
             cancel_order()
             st.rerun()
 
-    st.divider()
-
-    # 3. SMS ALANI
-    st.write("📩 **SMS Kodu**")
-    
-    if st.session_state.sms_code:
-        st.success("KOD GELDİ!")
-        st.code(st.session_state.sms_code, language="text")
-    else:
-        st.code(".....", language="text")
-        
-        # Manuel Yenileme
-        if st.button("🔄 Kontrol Et"):
+    # OTOMATİK KONTROL
+    if not st.session_state.sms_code:
+        if st.button("🔄 Manuel Kontrol"):
             check_sms()
             st.rerun()
-        
-        # Otomatik Süreç
+
         if st.session_state.start_time:
             elapsed = int(time.time() - st.session_state.start_time)
             rem = MAX_WAIT_SECONDS - elapsed
@@ -243,7 +274,6 @@ else:
             else:
                 st.error("Süre Doldu.")
 
-    # Debug
     with st.expander("🛠 Ham Veri"):
         st.json(st.session_state.raw_data)
 
