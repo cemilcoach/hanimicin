@@ -3,6 +3,7 @@ import hashlib
 import streamlit as st
 import requests
 import re
+import base64
 import streamlit.components.v1 as components
 
 # =============================
@@ -17,16 +18,16 @@ HEADERS = {
     "Accept": "application/json"
 }
 
-# --- 1. TERCİH (PORTEKİZ) ---
-CFG_1_COUNTRY = "portugal"
-CFG_1_OPERATOR = "virtual51"
-
-# --- 2. TERCİH (İNGİLTERE) ---
-CFG_2_COUNTRY = "england"
-CFG_2_OPERATOR = "virtual58"
-
+# SADECE İNGİLTERE AYARLARI
+COUNTRY = "england"
+OPERATOR = "virtual58"
 PRODUCT = "uber"
 MAX_WAIT_SECONDS = 900 
+
+# SES (BASE64)
+BEEP_SOUND = """
+data:audio/mp3;base64,SUQzBAAAAAABAFRYWFgAAAASAAADbWFqb3JfYnJhbmQAbXA0MgBUWFhYAAAAEQAAA21pbm9yX3ZlcnNpb24AMABUWFhYAAAAHAAAA2NvbXBhdGlibZVfYnJhbmRzAGlzb21tcDQyAFRTU0UAAAAPAAADTGF2ZjU3LjU2LjEwMAAAAAAAAAAAAAAA//NExAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NExAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NExAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NExAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NExAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NExAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NExAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NExAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NExAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NExAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NExAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NExAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NExAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NExAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NExAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NExAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq
+"""
 
 st.set_page_config(page_title="SMS Panel", layout="centered", initial_sidebar_state="collapsed")
 
@@ -74,12 +75,12 @@ if not check_login(): st.stop()
 # =============================
 # STATE
 # =============================
-for key in ["order_id", "phone_full", "phone_local", "sms_code", "status", "start_time", "raw_data", "current_country", "error_msg"]:
+for key in ["order_id", "phone_full", "phone_local", "sms_code", "status", "start_time", "raw_data", "error_msg"]:
     if key not in st.session_state:
         st.session_state[key] = None
 
 # =============================
-# ÇOKLU LİNK AÇMA (Uber & Mail)
+# JS LINK ACMA
 # =============================
 def open_multi_tabs():
     html_code = """
@@ -102,71 +103,44 @@ def open_multi_tabs():
             cursor: pointer;
             box-shadow: 0 4px 6px rgba(0,0,0,0.2);
             font-family: sans-serif;
-            margin-bottom: 10px;
-        }
-        .multi-btn:hover {
-            background-color: #1a5b9e;
+            margin-bottom: 5px;
         }
     </style>
     <button class="multi-btn" onclick="openSites()">🌐 Uber & Mail Aç</button>
     """
-    components.html(html_code, height=70)
+    components.html(html_code, height=60)
 
 # =============================
 # FONKSİYONLAR
 # =============================
 def buy_number():
     msg_box = st.empty()
-    
-    # --- ADIM 1: PORTEKİZ (6 Saniye Zorla) ---
-    end_time = time.time() + 6
-    attempt = 1
-    
-    while time.time() < end_time:
-        msg_box.info(f"🇵🇹 Portekiz deneniyor... ({attempt})", icon="⏳")
-        try:
-            url1 = f"{BASE_URL}/user/buy/activation/{CFG_1_COUNTRY}/{CFG_1_OPERATOR}/{PRODUCT}"
-            r1 = requests.get(url1, headers=HEADERS, timeout=5)
-            data1 = r1.json()
-            if "id" in data1:
-                set_session(data1, "🇵🇹 Portekiz")
-                return 
-        except: pass 
-        attempt += 1
-        time.sleep(1.5)
-
-    # --- ADIM 2: İNGİLTERE ---
-    msg_box.warning("⚠️ İngiltere'ye geçiliyor...", icon="🔄")
-    time.sleep(1)
-
     msg_box.info("🇬🇧 İngiltere alınıyor...", icon="🚀")
+    
     try:
-        url2 = f"{BASE_URL}/user/buy/activation/{CFG_2_COUNTRY}/{CFG_2_OPERATOR}/{PRODUCT}"
-        r2 = requests.get(url2, headers=HEADERS, timeout=10)
-        data2 = r2.json()
-        if "id" in data2:
-            set_session(data2, "🇬🇧 İngiltere")
+        url = f"{BASE_URL}/user/buy/activation/{COUNTRY}/{OPERATOR}/{PRODUCT}"
+        r = requests.get(url, headers=HEADERS, timeout=10)
+        data = r.json()
+        
+        if "id" in data:
+            full = data["phone"]
+            local = full.replace("+", "")
+            if local.startswith("44"): local = local[2:]
+            
+            st.session_state.order_id = data["id"]
+            st.session_state.phone_full = full
+            st.session_state.phone_local = local
+            st.session_state.sms_code = None
+            st.session_state.status = "BEKLİYOR"
+            st.session_state.start_time = time.time()
+            st.session_state.raw_data = None
+            st.session_state.error_msg = None
             return
         else:
-            st.session_state.error_msg = f"❌ İNGİLTERE DE DOLU! Hata: {data2}"
+            st.session_state.error_msg = f"❌ STOK YOK! Hata: {data}"
+            
     except Exception as e:
         st.session_state.error_msg = f"Bağlantı Hatası: {e}"
-
-def set_session(data, country_name):
-    full = data["phone"]
-    local = full.replace("+", "")
-    if local.startswith("44"): local = local[2:]
-    elif local.startswith("351"): local = local[3:]
-    
-    st.session_state.order_id = data["id"]
-    st.session_state.phone_full = full
-    st.session_state.phone_local = local
-    st.session_state.sms_code = None
-    st.session_state.status = "BEKLİYOR"
-    st.session_state.current_country = country_name
-    st.session_state.start_time = time.time()
-    st.session_state.raw_data = None
-    st.session_state.error_msg = None
 
 def check_sms():
     if not st.session_state.order_id: return False
@@ -217,8 +191,24 @@ def ban_order():
     except Exception as e:
         st.error(f"Bağlantı: {e}")
 
+def finish_order():
+    """Siparişi başarılı olarak tamamlar"""
+    if not st.session_state.order_id: return
+    try:
+        url = f"{BASE_URL}/user/finish/{st.session_state.order_id}"
+        r = requests.get(url, headers=HEADERS, timeout=10)
+        if r.status_code == 200:
+            st.toast("✅ Tamamlandı!", icon="✨")
+            reset_state()
+        else:
+            # Bazen süre bitince finish hata verebilir ama biz yine de ekranı temizleyelim
+            st.toast("Tamamlandı (Sunucu yanıt vermese de)", icon="👍")
+            reset_state()
+    except:
+        reset_state()
+
 def reset_state():
-    for key in ["order_id", "phone_full", "phone_local", "sms_code", "start_time", "status", "raw_data", "current_country", "error_msg"]:
+    for key in ["order_id", "phone_full", "phone_local", "sms_code", "start_time", "status", "raw_data", "error_msg"]:
         st.session_state[key] = None
 
 # =============================
@@ -226,27 +216,22 @@ def reset_state():
 # =============================
 
 open_multi_tabs()
-st.write("")
 
 if not st.session_state.order_id:
-    # --- HAZIR ---
-    st.info("Sistem Hazır. (6sn Portekiz -> İngiltere)")
-    
+    # --- NUMARA ALMA ---
     if st.session_state.error_msg:
         st.error(st.session_state.error_msg)
         if st.button("🗑️ Temizle"):
             st.session_state.error_msg = None
             st.rerun()
 
-    if st.button("🚀 NUMARA AL (Uber)", type="primary"):
+    if st.button("🚀 NUMARA AL (🇬🇧 İngiltere)", type="primary"):
         buy_number()
         st.rerun()
 
 else:
     # --- NUMARA VARSA ---
-    st.markdown(f"### {st.session_state.current_country}")
-    
-    st.write("🌍 **Tam Numara**")
+    st.write("🌍 **Tam Numara (İngiltere)**")
     st.code(st.session_state.phone_full, language="text")
 
     st.write("🏠 **Sadece Numara (KODSUZ)**")
@@ -256,30 +241,42 @@ else:
     st.write("📩 **SMS Kodu**")
     
     if st.session_state.sms_code:
+        # --- SMS GELDİ ---
         st.success("MESAJ GELDİ!")
         st.code(st.session_state.sms_code, language="text")
-        st.markdown("""
+        
+        # SES
+        st.markdown(f"""
             <audio autoplay="true">
-            <source src="https://upload.wikimedia.org/wikipedia/commons/a/a5/Glass_ping-sound.wav" type="audio/wav">
+            <source src="{BEEP_SOUND}" type="audio/mp3">
             </audio>
             """, unsafe_allow_html=True)
+            
+        st.divider()
+        
+        # --- SMS GELİNCE SADECE TAMAMLA TUŞU ---
+        if st.button("✅ Tamamla", type="primary", use_container_width=True):
+            finish_order()
+            st.rerun()
+
     else:
+        # --- SMS BEKLENİYOR ---
         st.code(".....", language="text")
+        
+        st.divider()
 
-    st.divider()
+        # --- SMS GELMEDEN ÖNCE BAN/İPTAL TUŞLARI ---
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("🚫 Banla", use_container_width=True):
+                ban_order()
+                st.rerun()
+        with c2:
+            if st.button("❌ İptal", type="primary", use_container_width=True):
+                cancel_order()
+                st.rerun()
 
-    # BUTONLAR
-    c1, c2 = st.columns(2)
-    with c1:
-        if st.button("🚫 Banla", use_container_width=True):
-            ban_order()
-            st.rerun()
-    with c2:
-        if st.button("❌ İptal", type="primary", use_container_width=True):
-            cancel_order()
-            st.rerun()
-
-    # OTOMATİK KONTROL
+    # OTOMATİK KONTROL (Sadece SMS gelmediyse çalışır)
     if not st.session_state.sms_code:
         if st.button("🔄 Manuel Kontrol"):
             if check_sms(): st.rerun()
